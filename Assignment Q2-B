@@ -1,0 +1,193 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Dec  5 10:29:45 2022
+
+@author: maxcrebolder
+"""
+
+
+
+import pandas as pd
+import matplotlib.pyplot as plt
+from gurobi import *
+import numpy as np
+
+
+df = pd.read_csv('data_small.txt', sep = "\t", names =  ['0', '1', '2', '3', '4', '5', '6'])
+
+#print(pd.DataFrame(df))
+
+# read data_large.text and data_small.text
+import seaborn as sns
+
+# read data_large.text and data_small.text
+data_large = pd.read_csv('data_large.txt', sep='\t', names=['Location ID', 'X_Coordinate', 'Y_Coordinate', 'Demand', 'Ready Time', 'Due Date', 'Service Time'])
+data_small = pd.read_csv('data_small.txt', sep='\t', names=['Location ID', 'X_Coordinate', 'Y_Coordinate', 'Demand', 'Ready Time', 'Due Date', 'Service Time'])
+
+# show the entire data
+#print(data_large)
+print(data_small)
+
+
+# first collum is location_ID
+LOC_ID = (data_small.iloc[:,0])
+
+# second collum is X_coordinate
+X_COORD = (data_small.iloc[:,1])
+
+# third collum is Y_coordinate
+Y_COORD = (data_small.iloc[:,2])
+
+# fourth collum is demand at the location
+D = (data_small.iloc[:,3])
+
+# fifth collum is ready time at the location
+RT = (data_small.iloc[:,4])
+
+# sixth collum is due time at the location
+DT = (data_small.iloc[:,5])
+
+# seventh collum is service time at the location
+ST = (data_small.iloc[:,6])
+
+M = 1000000     # Large integer for 
+
+c_matrix = np.zeros([len(LOC_ID), len(LOC_ID)])
+for i in range(len(LOC_ID)):
+    for j in range(len(LOC_ID)):
+                if i == j:
+                    c_matrix[i][j] = M
+                else:
+                    c_matrix[i][j] = np.sqrt((X_COORD[j] - X_COORD[i])** 2 + (Y_COORD[j] - Y_COORD[i])** 2)
+
+print(c_matrix)
+
+N = 7 
+
+model = Model ('Assignment_2b')
+
+# ---- Sets ----
+
+I = range (len(LOC_ID))                # set of Nodes
+J = range (len(LOC_ID))                   # set of edges
+
+
+# ---- Variables ----
+
+# Decision Variable x(i,j) (Travelled between node i and node j)
+
+x = {} 
+for i in I:
+    for j in J:
+        x[i,j] = model.addVar(vtype = GRB.BINARY, name = 'x[' + str(j) + ']')
+
+# Decision Variable z(j) (Distance travelled between node i and node j)
+
+z = {} 
+for j in J:
+    z[j] = model.addVar(vtype = GRB.CONTINUOUS, name = 'z[' + str(j) + ']')
+    
+t = {}
+for i in I:
+    for j in J:
+        t[i,j]= model.addVar(vtype = GRB.CONTINUOUS, name  = 't[' + str(i) + ',' + str(j) + ']')
+
+u = {}
+for i in I:
+    for j in J:
+        u[i,j] = model.addVar(vtype = GRB.CONTINUOUS, name  = 'u[' + str(i) + ',' + str(j) + ']')
+        
+# Integrate new variables
+model.update ()
+
+
+# ---- Objective Function ----
+
+model.setObjective(quicksum((c_matrix[i,j] * x[i,j]) for i in I for j in J))
+model.modelSense = GRB.MINIMIZE
+model.update ()
+
+
+# ---- Constraints ----
+
+# Contraint 1: distance between the nodes
+con1 ={}
+con2 = {}
+for i in I: 
+    for j in J: 
+        if i != j:
+            con1[i,j] = model.addConstr(quicksum(x[i,j] for i in I) == 1)
+            con2[i,j]= model.addConstr(quicksum(x[i,j] for j in J) == 1)
+        
+#for i in range(len(J)-1):   
+#    model.addConstr((x[i,j] == 1) >> (u[i] + 1 == u[j]))
+#model.addConstr(u[i] - u[j] + quicksum(x[i,j] for i in I for j in J) <= (N-1))
+
+# Contraint 2: symmetry
+#con3 ={}
+#for i in I:
+#    for j in J:
+#        con3 = model.addConstr(x[i,j] != x[j,i])
+
+# Contraint 3: subtour elimenation
+
+#model.addConstr(x[i,j])
+
+# Constraint starting time depot
+#con3 ={}
+#for j in J:
+#    con3[i,j]= model.addConstr(RT[i] + c_matrix[i,j] - M(1-x[i,j]) <= t[j] for j in J)
+
+# Constraint arrival time vehicle 
+#con4 ={}
+#for i in I:
+#    for j in J:
+#        con4[i,j] = model.addConstr(t[i] + c_matrix[i,j] + ST[i] - M(1-x[i,j]) <= t[j])
+
+# Constraint arrival time after opening time
+#for j in J:
+#    model.addConstr(t[i] >= RT[j])
+
+# Constraint before due time
+ 
+#model.addConstr(t[i] <= DT[j])
+
+# Constraint time > 0
+#model.addConstr(t[i] > 0)
+# ---- Solve ----
+
+
+model.setParam('OutputFlag', True) # silencing gurobi output or not
+model.setParam ('MIPGap', 0);       # find the optimal solution
+model.write("output.lp")            # print the model in .lp format file
+
+model.optimize ()
+
+
+plt.figure(figsize = (12, 5))
+for i in range(len(LOC_ID)):
+    plt.scatter(X_COORD[i], Y_COORD[i], color = 'blue') 
+    plt.annotate(str(LOC_ID[i]), xy = (X_COORD[i], Y_COORD[i]), xytext = (X_COORD[i] + 0.05, Y_COORD[i] + 0.3), color = 'red')
+
+if model.status == GRB.Status.OPTIMAL: # If optimal solution is found
+    print('all decision variables:\n')
+    # number of workers
+    for j in J:
+        r ='%8s' % 'x[i,j]'
+    for i in I:
+        r = r + '%8s' %LOC_ID[i]
+    print(r)
+    
+    for j in J:
+        r = '%8s'  % LOC_ID[j]
+        for i in I:
+            r = r + '%8.1f' % x[i,j].x
+        r = r + ' .%8.1f' %sum(x[i,j].x for i in I)
+        print(r)
+        
+    r = '%8s' % 'Total'
+    for i in I:
+        r = r + '%8.1f' %sum(x[i,j].x for j in J)
+    print(r)
+    
